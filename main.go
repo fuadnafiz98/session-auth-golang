@@ -4,10 +4,26 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"sync"
 )
+
+type Template struct {
+	tmpl *template.Template
+}
+
+func newTemplate() *Template {
+	return &Template{
+		tmpl: template.Must(template.ParseGlob("views/*.html")),
+	}
+}
+
+// might have to use context
+func (t *Template) Render(w io.Writer, name string, data interface{}) error {
+	return t.tmpl.ExecuteTemplate(w, name, data)
+}
 
 type Session struct {
 	Username string
@@ -25,13 +41,12 @@ var store = SessionStore{
 	sessions: make(map[string]Session),
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	// try to get the session
+func getSession(w http.ResponseWriter, r *http.Request) (s Session, e error) {
 	cookie, err := r.Cookie("_session_id")
 
 	if err != nil || cookie == nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
+		return Session{}, fmt.Errorf("No Session")
 	}
 
 	sessionId := cookie.Value
@@ -42,43 +57,27 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return Session{}, fmt.Errorf("No Session")
+	}
+	return session, nil
+}
+
+func indexHandler(w http.ResponseWriter, r *http.Request) {
+	template := newTemplate()
+	session, err := getSession(w, r)
+
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
+	fmt.Println(session.Username)
 
-	response := `
-	<html>
-		<head>
-			<title>Go Session Auth</title>
-		</head>
-		<body>
-			<h1>Welcome!</h1>
-	`
-	response += session.Username + "<br />"
-	response += `
-	<a href="/logout">Logout</a>
-		</body>
-	</html>
-	`
-	fmt.Fprintf(w, "%v", response)
+	template.Render(w, "index.html", session)
 }
 
 func getLoginHandler(w http.ResponseWriter, r *http.Request) {
-	response := `
-	<html>
-		<head>
-			<title>Go Session Auth</title>
-		</head>
-		<body>
-			<form action="/login" method="POST">
-				<label for="username">Username:</label>
-				<input type="text" name="username" id="username" /><br />
-				<label for="password">Password:</label>
-				<input type="password" name="password" id="password" /><br />
-				<button class="btn" type="submit">Submit</button>
-		</body>
-	</html>
-	`
-	fmt.Fprintf(w, "%v", response)
+	template := newTemplate()
+	template.Render(w, "login.html", nil)
 }
 
 func generateSessionId() (string, error) {
@@ -149,20 +148,20 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	router := http.NewServeMux()
+	//declare template here
 	router.HandleFunc("GET /", indexHandler)
 	router.HandleFunc("GET /login", getLoginHandler)
 	router.HandleFunc("POST /login", postLoginHandler)
 	router.HandleFunc("GET /logout", logoutHandler)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    "0.0.0.0:8080",
 		Handler: router,
 	}
 
-	fmt.Println("--- SERVER IS RUNNING ---")
+	fmt.Println("Server is running on port", server.Addr)
 	err := server.ListenAndServe()
 	if err != nil {
 		panic("ERROR!")
 	}
-
 }
